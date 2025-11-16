@@ -1099,7 +1099,16 @@ class FichaFinanceiraProcessor:
         if additional_months:
             ordered_months.extend(sorted(additional_months))
 
-        header = ["PERIODO", "HORAS TRAB.", "FALTAS"]
+        header = [
+            "PERIODO",
+            "HORAS TRAB.",
+            "FALTAS",
+            "DIAS TRABALHADOS",
+            "DIAS FERIAS",
+        ]
+
+        horas_referencia = Decimal("200")
+        dias_referencia = Decimal("30")
 
         with output_path.open("w", newline="", encoding="utf-8") as csv_file:
             writer = csv.writer(csv_file, delimiter=";", lineterminator="\n")
@@ -1110,11 +1119,26 @@ class FichaFinanceiraProcessor:
                 horas_valor = horas_map.get((year, month), Decimal("0"))
                 faltas_valor = faltas_map.get((year, month), Decimal("0"))
 
+                dias_trabalhados_valor = None
+                dias_ferias_valor = None
+
+                if horas_valor != horas_referencia:
+                    dias_trabalhados_valor = (
+                        (horas_valor * dias_referencia) / horas_referencia
+                    )
+                    dias_ferias_valor = dias_trabalhados_valor - dias_referencia
+
                 writer.writerow(
                     [
                         mes_ano,
                         self._format_decimal(horas_valor),
                         self._format_decimal(faltas_valor),
+                        self._format_decimal(dias_trabalhados_valor)
+                        if dias_trabalhados_valor is not None
+                        else "",
+                        self._format_decimal(dias_ferias_valor)
+                        if dias_ferias_valor is not None
+                        else "",
                     ]
                 )
 
