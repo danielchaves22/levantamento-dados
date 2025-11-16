@@ -50,6 +50,19 @@ class ActiveBlock:
 class FichaFinanceiraProcessor:
     """Responsável por extrair dados da ficha financeira e gerar CSVs."""
 
+    AFASTAMENTO_CODES: Tuple[Dict[str, str], ...] = (
+        {
+            "code": "902-AfastDoenca",
+            "label": "902-AFAST. DOENCA",
+            "log": "HORAS TRABALHADAS - AFAST. DOENCA",
+        },
+        {
+            "code": "910-AfastMaternidade",
+            "label": "910-AFAST. MATERNIDADE",
+            "log": "HORAS TRABALHADAS - AFAST. MATERNIDADE",
+        },
+    )
+
     TARGET_CODES: Dict[str, Dict[str, object]] = {
         "1-Salario": {"column": 1},
         "6-Horas": {"column": 1, "search_prefix": "6 -"},
@@ -68,6 +81,8 @@ class FichaFinanceiraProcessor:
         "527-INSS-Comp": {"column": 1, "search_prefix": "527"},
         "527-INSS-Valor": {"column": 2, "search_prefix": "527"},
         "952-FaltaInjustifica": {"column": 1, "search_prefix": "952"},
+        "902-AfastDoenca": {"column": 1, "search_prefix": "902"},
+        "910-AfastMaternidade": {"column": 1, "search_prefix": "910"},
     }
 
     OUTPUT_SPECS: Tuple[Dict[str, object], ...] = (
@@ -92,6 +107,7 @@ class FichaFinanceiraProcessor:
             "writer": "horas_trabalhadas",
             "faltas_code": "952-FaltaInjustifica",
             "faltas_log": "HORAS TRABALHADAS - FALTAS",
+            "afastamentos": AFASTAMENTO_CODES,
         },
     )
 
@@ -360,6 +376,30 @@ class FichaFinanceiraProcessor:
                     config_key="horas_trabalhadas_time_mode",
                     fallback_key="cartoes_time_mode",
                 )
+                afastamentos_config = spec.get("afastamentos", [])
+                afastamentos_series: List[Dict[str, object]] = []
+                for afast_config in afastamentos_config:
+                    afast_values = self._collect_values_for_code(
+                        aggregated,
+                        afast_config["code"],
+                        months_range,
+                        afast_config.get("log", afast_config["label"]),
+                    )
+                    afast_values = self._normalize_minutes_series(
+                        afast_values,
+                        afast_config["label"],
+                        config_key="horas_trabalhadas_time_mode",
+                        fallback_key="cartoes_time_mode",
+                    )
+                    afastamentos_series.append(
+                        {
+                            "label": afast_config["label"],
+                            "values": afast_values,
+                            "include": self._has_non_zero_value(
+                                aggregated, afast_config["code"]
+                            ),
+                        }
+                    )
                 values = horas_values
                 self._write_horas_trabalhadas_csv(
                     output_path,
@@ -367,6 +407,7 @@ class FichaFinanceiraProcessor:
                     horas_values,
                     faltas_values,
                     horas_registradas,
+                    afastamentos=afastamentos_series,
                 )
             else:
                 values = self._collect_values_for_code(
@@ -939,6 +980,12 @@ class FichaFinanceiraProcessor:
 
         return results
 
+    def _has_non_zero_value(
+        self, aggregated: Dict[str, NumberByMonth], code: str
+    ) -> bool:
+        values = aggregated.get(code, {})
+        return any(value not in (None, Decimal("0")) for value in values.values())
+
     def _apply_vacation_adjustments(
         self, aggregated: Dict[str, NumberByMonth]
     ) -> None:
@@ -1061,6 +1108,10 @@ class FichaFinanceiraProcessor:
         if include_extra_100:
             header.append("HORA EXTRA 100%")
 
+        meses_registrados = (
+            set(horas_com_registro) if horas_com_registro is not None else None
+        )
+
         ordered_months: List[Tuple[int, int]] = list(months)
 
         missing_months = [
@@ -1093,6 +1144,8 @@ class FichaFinanceiraProcessor:
         horas: Iterable[Tuple[int, int, Decimal]],
         faltas: Iterable[Tuple[int, int, Decimal]],
         horas_com_registro: Optional[Set[Tuple[int, int]]] = None,
+        *,
+        afastamentos: Optional[List[Dict[str, object]]] = None,
     ) -> None:
         horas_map = {(year, month): value for year, month, value in horas}
         faltas_map = {(year, month): value for year, month, value in faltas}
@@ -1103,9 +1156,33 @@ class FichaFinanceiraProcessor:
 
         ordered_months: List[Tuple[int, int]] = list(months)
 
+        afastamentos = afastamentos or []
+        afastamento_months: Set[Tuple[int, int]] = set()
+        afastamento_series: List[Dict[str, object]] = []
+        afastamento_headers: List[str] = []
+
+        for afastamento in afastamentos:
+            values_iter = afastamento.get("values", [])
+            values_map = {
+                (year, month): value
+                for year, month, value in values_iter
+            }
+            afastamento_months.update(values_map.keys())
+            include_column = bool(afastamento.get("include"))
+            afastamento_series.append(
+                {
+                    "label": afastamento.get("label", ""),
+                    "map": values_map,
+                    "include": include_column,
+                }
+            )
+            if include_column:
+                afastamento_headers.append(afastamento.get("label", ""))
+
         additional_months = [
             key
             for key in set(horas_map.keys()) | set(faltas_map.keys())
+            | afastamento_months
             if key not in ordered_months
         ]
         if additional_months:
@@ -1115,6 +1192,7 @@ class FichaFinanceiraProcessor:
             "PERIODO",
             "HORAS TRAB.",
             "FALTAS",
+            *afastamento_headers,
             "DIAS TRABALHADOS",
             "DIAS FERIAS",
         ]
@@ -1136,6 +1214,21 @@ class FichaFinanceiraProcessor:
                 if horas_valor is None or not tem_registro:
                     horas_valor = horas_referencia
                 faltas_valor = faltas_map.get((year, month), Decimal("0"))
+                total_afastamentos = Decimal("0")
+                afastamento_row_values: List[str] = []
+                for afastamento in afastamento_series:
+                    valor_afast = afastamento["map"].get(
+                        (year, month), Decimal("0")
+                    )
+                    total_afastamentos += valor_afast
+                    if afastamento["include"]:
+                        afastamento_row_values.append(
+                            self._format_decimal(valor_afast)
+                        )
+
+                horas_planilha = horas_referencia - total_afastamentos
+                if horas_planilha < Decimal("0"):
+                    horas_planilha = Decimal("0")
 
                 dias_trabalhados_valor = None
                 dias_ferias_valor = None
@@ -1149,8 +1242,9 @@ class FichaFinanceiraProcessor:
                 writer.writerow(
                     [
                         mes_ano,
-                        self._format_decimal(horas_valor),
+                        self._format_decimal(horas_planilha),
                         self._format_decimal(faltas_valor),
+                        *afastamento_row_values,
                         self._format_decimal(dias_trabalhados_valor)
                         if dias_trabalhados_valor is not None
                         else "",

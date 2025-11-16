@@ -20,7 +20,7 @@ A janela mantém um painel de logs para acompanhar o andamento da extração.
 - Para o `PROVENTOS.csv`, são coletados os valores da verba **`3123 - Base INSS (Folha)`** na coluna `Valor`. Se o mês estiver ausente no PDF, o resultado é preenchido com `0`.
 - Para o `ADIC. INSALUBRIDADE PAGO.csv`, são utilizados os valores da verba **`8 - Insalubridade`** na coluna `Valor`, seguindo a mesma regra de preenchimento com `0` para meses não encontrados.
 - Para o `CARTÕES.csv`, são utilizados os valores da verba **`6 - Horas Extras 50%`** na coluna `Comp.`. Meses que não apresentarem essa verba são preenchidos com `0`.
-- Para o `HORAS TRABALHADAS.csv`, a coluna `HORAS TRAB.` usa os valores da verba **`1 - Salário`** (coluna `Comp.`) e a coluna `FALTAS` usa os valores da verba **`952 - Falta Injustifica`** (coluna `Comp.`). Quando o período solicitado começa antes dos registros existentes na ficha, os meses sem valores são preenchidos automaticamente com `200` horas (equivalente à jornada integral). A planilha também inclui `DIAS TRABALHADOS` e `DIAS FERIAS`, calculados pela fórmula `(HORAS TRAB. * 30 / 200)` e `30 - DIAS TRABALHADOS`, respectivamente, exceto quando `HORAS TRAB.` é igual a `200`, caso em que os campos permanecem em branco. Todos os campos aplicam a conversão de minutos para centesimal quando configurado especificamente para "horas trabalhadas/faltas" nas opções do projeto.
+- Para o `HORAS TRABALHADAS.csv`, a coluna `HORAS TRAB.` parte sempre da jornada integral (`200` horas) e subtrai o total de horas indicadas nos códigos de afastamento reconhecidos atualmente (**`902 - Afast. Doença`** e **`910 - Afast. Maternidade`**). A coluna `FALTAS` continua lendo a verba **`952 - Falta Injustifica`** e os campos `DIAS TRABALHADOS`/`DIAS FERIAS` seguem sendo calculados com base na verba **`1 - Salário`** (coluna `Comp.`), respeitando a conversão de minutos quando configurada. Meses sem registros prévios são automaticamente preenchidos com `200` horas de referência, antes da subtração dos afastamentos.
 - Meses fora do intervalo solicitado são descartados, mesmo que existam no documento.
 - As colunas `FGTS`, `FGTS_REC.`, `CONTRIBUICAO_SOCIAL` e `CONTRIBUICAO_SOCIAL_REC.` são preenchidas com `N`, conforme especificação.
 
@@ -36,7 +36,7 @@ Cada linha representa um mês no formato `MM/AAAA`, com os valores convertidos p
 
 O arquivo `CARTÕES.csv` possui duas ou três colunas (`PERIODO`, `HORA EXTRA 50%` e opcionalmente `HORA EXTRA 100%`), usando o mesmo separador `;`.
 
-O arquivo `HORAS TRABALHADAS.csv` possui cinco colunas (`PERIODO`, `HORAS TRAB.`, `FALTAS`, `DIAS TRABALHADOS` e `DIAS FERIAS`), seguindo o padrão de separador `;` e os mesmos ajustes de conversão de minutos para centesimal quando habilitados. Os dias são calculados usando a equivalência de 200 horas = 30 dias.
+O arquivo `HORAS TRABALHADAS.csv` possui as colunas fixas `PERIODO`, `HORAS TRAB.`, `FALTAS`, `DIAS TRABALHADOS` e `DIAS FERIAS`, seguindo o padrão de separador `;`. Quando algum código de afastamento possui valores em pelo menos um mês, é adicionada uma coluna específica com o nome do código (por exemplo, `902-AFAST. DOENCA`). Os dias continuam calculados usando a equivalência de 200 horas = 30 dias.
 
 ## 🔁 Reutilização futura
 
