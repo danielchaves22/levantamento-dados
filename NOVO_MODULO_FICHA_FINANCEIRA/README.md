@@ -20,7 +20,7 @@ A janela mantém um painel de logs para acompanhar o andamento da extração.
 - Para o `PROVENTOS.csv`, são coletados os valores da verba **`3123 - Base INSS (Folha)`** na coluna `Valor`. Se o mês estiver ausente no PDF, o resultado é preenchido com `0`.
 - Para o `ADIC. INSALUBRIDADE PAGO.csv`, são utilizados os valores da verba **`8 - Insalubridade`** na coluna `Valor`, seguindo a mesma regra de preenchimento com `0` para meses não encontrados.
 - Para o `CARTÕES.csv`, são utilizados os valores da verba **`6 - Horas Extras 50%`** na coluna `Comp.`. Meses que não apresentarem essa verba são preenchidos com `0`.
-- Para o `HORAS TRABALHADAS.csv`, a coluna `HORAS TRAB.` usa os valores da verba **`1 - Salário`** (coluna `Comp.`) e a coluna `FALTAS` usa os valores da verba **`952 - Falta Injustifica`** (coluna `Comp.`). Ambos aplicam a conversão de minutos para centesimal quando configurado especificamente para "horas trabalhadas/faltas" nas opções do projeto.
+- Para o `HORAS TRABALHADAS.csv`, a coluna `HORAS TRAB.` usa os valores da verba **`1 - Salário`** (coluna `Comp.`) e a coluna `FALTAS` usa os valores da verba **`952 - Falta Injustifica`** (coluna `Comp.`). A planilha também inclui `DIAS TRABALHADOS` e `DIAS FERIAS`, calculados pela fórmula `(HORAS TRAB. * 30 / 200)` e `DIAS TRABALHADOS - 30`, respectivamente, exceto quando `HORAS TRAB.` é igual a `200`, caso em que os campos permanecem em branco. Todos os campos aplicam a conversão de minutos para centesimal quando configurado especificamente para "horas trabalhadas/faltas" nas opções do projeto.
 - Meses fora do intervalo solicitado são descartados, mesmo que existam no documento.
 - As colunas `FGTS`, `FGTS_REC.`, `CONTRIBUICAO_SOCIAL` e `CONTRIBUICAO_SOCIAL_REC.` são preenchidas com `N`, conforme especificação.
 
@@ -36,7 +36,7 @@ Cada linha representa um mês no formato `MM/AAAA`, com os valores convertidos p
 
 O arquivo `CARTÕES.csv` possui duas ou três colunas (`PERIODO`, `HORA EXTRA 50%` e opcionalmente `HORA EXTRA 100%`), usando o mesmo separador `;`.
 
-O arquivo `HORAS TRABALHADAS.csv` possui três colunas (`PERIODO`, `HORAS TRAB.` e `FALTAS`), seguindo o padrão de separador `;` e os mesmos ajustes de conversão de minutos para centesimal quando habilitados.
+O arquivo `HORAS TRABALHADAS.csv` possui cinco colunas (`PERIODO`, `HORAS TRAB.`, `FALTAS`, `DIAS TRABALHADOS` e `DIAS FERIAS`), seguindo o padrão de separador `;` e os mesmos ajustes de conversão de minutos para centesimal quando habilitados. Os dias são calculados usando a equivalência de 200 horas = 30 dias.
 
 ## 🔁 Reutilização futura
 

@@ -1,5 +1,6 @@
 from decimal import Decimal
 from pathlib import Path
+from tempfile import TemporaryDirectory
 import unittest
 
 from processors.ficha_financeira_processor import FichaFinanceiraProcessor
@@ -52,6 +53,42 @@ class InsalubridadeExtractionTest(unittest.TestCase):
 
         self.assertEqual(Decimal("484.80"), insalubridade.get((2022, 3)))
         self.assertEqual(Decimal("607.20"), insalubridade.get((2025, 4)))
+
+
+class HorasTrabalhadasCsvTest(unittest.TestCase):
+    def test_includes_day_columns_with_formula(self) -> None:
+        processor = FichaFinanceiraProcessor()
+        with TemporaryDirectory() as tmp_dir:
+            output_path = Path(tmp_dir) / "horas.csv"
+            processor._write_horas_trabalhadas_csv(
+                output_path,
+                months=[(2024, 1)],
+                horas=[(2024, 1, Decimal("180"))],
+                faltas=[],
+            )
+
+            content = output_path.read_text(encoding="utf-8").strip().splitlines()
+
+        self.assertEqual(
+            "PERIODO;HORAS TRAB.;FALTAS;DIAS TRABALHADOS;DIAS FERIAS",
+            content[0],
+        )
+        self.assertEqual("01/2024;180;0;27;-3", content[1])
+
+    def test_leaves_day_columns_blank_when_hours_equal_reference(self) -> None:
+        processor = FichaFinanceiraProcessor()
+        with TemporaryDirectory() as tmp_dir:
+            output_path = Path(tmp_dir) / "horas.csv"
+            processor._write_horas_trabalhadas_csv(
+                output_path,
+                months=[(2024, 2)],
+                horas=[(2024, 2, Decimal("200"))],
+                faltas=[(2024, 2, Decimal("5"))],
+            )
+
+            content = output_path.read_text(encoding="utf-8").strip().splitlines()
+
+        self.assertEqual("02/2024;200;5;;", content[1])
 
 
 if __name__ == "__main__":
