@@ -1108,10 +1108,6 @@ class FichaFinanceiraProcessor:
         if include_extra_100:
             header.append("HORA EXTRA 100%")
 
-        meses_registrados = (
-            set(horas_com_registro) if horas_com_registro is not None else None
-        )
-
         ordered_months: List[Tuple[int, int]] = list(months)
 
         missing_months = [
