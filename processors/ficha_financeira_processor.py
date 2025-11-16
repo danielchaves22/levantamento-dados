@@ -333,6 +333,9 @@ class FichaFinanceiraProcessor:
                     months_range,
                     spec["log"],
                 )
+                horas_registradas = set(
+                    aggregated.get(spec["code"], {}).keys()
+                )
                 faltas_code = spec.get("faltas_code")
                 faltas_log = spec.get("faltas_log", spec["log"])
                 faltas_values = (
@@ -359,7 +362,11 @@ class FichaFinanceiraProcessor:
                 )
                 values = horas_values
                 self._write_horas_trabalhadas_csv(
-                    output_path, months_range, horas_values, faltas_values
+                    output_path,
+                    months_range,
+                    horas_values,
+                    faltas_values,
+                    horas_registradas,
                 )
             else:
                 values = self._collect_values_for_code(
@@ -1085,9 +1092,14 @@ class FichaFinanceiraProcessor:
         months: Iterable[Tuple[int, int]],
         horas: Iterable[Tuple[int, int, Decimal]],
         faltas: Iterable[Tuple[int, int, Decimal]],
+        horas_com_registro: Optional[Set[Tuple[int, int]]] = None,
     ) -> None:
         horas_map = {(year, month): value for year, month, value in horas}
         faltas_map = {(year, month): value for year, month, value in faltas}
+
+        meses_registrados = (
+            set(horas_com_registro) if horas_com_registro is not None else None
+        )
 
         ordered_months: List[Tuple[int, int]] = list(months)
 
@@ -1117,7 +1129,11 @@ class FichaFinanceiraProcessor:
             for year, month in ordered_months:
                 mes_ano = f"{month:02d}/{year}"
                 horas_valor = horas_map.get((year, month))
-                if horas_valor is None:
+                tem_registro = (
+                    meses_registrados is None
+                    or (year, month) in meses_registrados
+                )
+                if horas_valor is None or not tem_registro:
                     horas_valor = horas_referencia
                 faltas_valor = faltas_map.get((year, month), Decimal("0"))
 

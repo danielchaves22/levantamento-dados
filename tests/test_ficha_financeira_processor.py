@@ -105,6 +105,38 @@ class HorasTrabalhadasCsvTest(unittest.TestCase):
 
         self.assertEqual("03/2024;200;0;;", content[1])
 
+    def test_defaults_hours_to_reference_when_zero_is_placeholder(self) -> None:
+        processor = FichaFinanceiraProcessor()
+        with TemporaryDirectory() as tmp_dir:
+            output_path = Path(tmp_dir) / "horas.csv"
+            processor._write_horas_trabalhadas_csv(
+                output_path,
+                months=[(2024, 4)],
+                horas=[(2024, 4, Decimal("0"))],
+                faltas=[],
+                horas_com_registro=set(),
+            )
+
+            content = output_path.read_text(encoding="utf-8").strip().splitlines()
+
+        self.assertEqual("04/2024;200;0;;", content[1])
+
+    def test_keeps_zero_hours_when_month_has_registered_value(self) -> None:
+        processor = FichaFinanceiraProcessor()
+        with TemporaryDirectory() as tmp_dir:
+            output_path = Path(tmp_dir) / "horas.csv"
+            processor._write_horas_trabalhadas_csv(
+                output_path,
+                months=[(2024, 5)],
+                horas=[(2024, 5, Decimal("0"))],
+                faltas=[],
+                horas_com_registro={(2024, 5)},
+            )
+
+            content = output_path.read_text(encoding="utf-8").strip().splitlines()
+
+        self.assertEqual("05/2024;0;0;0;30", content[1])
+
 
 if __name__ == "__main__":
     unittest.main()
