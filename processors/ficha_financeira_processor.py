@@ -1116,7 +1116,9 @@ class FichaFinanceiraProcessor:
 
             for year, month in ordered_months:
                 mes_ano = f"{month:02d}/{year}"
-                horas_valor = horas_map.get((year, month), Decimal("0"))
+                horas_valor = horas_map.get((year, month))
+                if horas_valor is None:
+                    horas_valor = horas_referencia
                 faltas_valor = faltas_map.get((year, month), Decimal("0"))
 
                 dias_trabalhados_valor = None
@@ -1126,7 +1128,7 @@ class FichaFinanceiraProcessor:
                     dias_trabalhados_valor = (
                         (horas_valor * dias_referencia) / horas_referencia
                     )
-                    dias_ferias_valor = dias_trabalhados_valor - dias_referencia
+                    dias_ferias_valor = dias_referencia - dias_trabalhados_valor
 
                 writer.writerow(
                     [

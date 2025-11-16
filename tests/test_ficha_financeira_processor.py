@@ -73,7 +73,7 @@ class HorasTrabalhadasCsvTest(unittest.TestCase):
             "PERIODO;HORAS TRAB.;FALTAS;DIAS TRABALHADOS;DIAS FERIAS",
             content[0],
         )
-        self.assertEqual("01/2024;180;0;27;-3", content[1])
+        self.assertEqual("01/2024;180;0;27;3", content[1])
 
     def test_leaves_day_columns_blank_when_hours_equal_reference(self) -> None:
         processor = FichaFinanceiraProcessor()
@@ -89,6 +89,21 @@ class HorasTrabalhadasCsvTest(unittest.TestCase):
             content = output_path.read_text(encoding="utf-8").strip().splitlines()
 
         self.assertEqual("02/2024;200;5;;", content[1])
+
+    def test_defaults_hours_to_reference_when_month_has_no_data(self) -> None:
+        processor = FichaFinanceiraProcessor()
+        with TemporaryDirectory() as tmp_dir:
+            output_path = Path(tmp_dir) / "horas.csv"
+            processor._write_horas_trabalhadas_csv(
+                output_path,
+                months=[(2024, 3)],
+                horas=[],
+                faltas=[],
+            )
+
+            content = output_path.read_text(encoding="utf-8").strip().splitlines()
+
+        self.assertEqual("03/2024;200;0;;", content[1])
 
 
 if __name__ == "__main__":
