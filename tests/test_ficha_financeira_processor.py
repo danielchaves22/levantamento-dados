@@ -48,6 +48,9 @@ class InsalubridadeExtractionTest(unittest.TestCase):
             "LIMA DA SILVAProcesso_0000132-43.2023.5.09.0562.pdf"
         )
 
+        if not pdf_path.exists():
+            self.skipTest("Arquivo de PDF de teste não está disponível no ambiente atual.")
+
         parse_result = processor._parse_pdf(pdf_path)
         insalubridade = parse_result["values"].get("8-Insalubridade", {})
 
@@ -73,7 +76,7 @@ class HorasTrabalhadasCsvTest(unittest.TestCase):
             "PERIODO;HORAS TRAB.;FALTAS;DIAS TRABALHADOS;DIAS FERIAS",
             content[0],
         )
-        self.assertEqual("01/2024;180;0;27;3", content[1])
+        self.assertEqual("01/2024;200;0;27;3", content[1])
 
     def test_leaves_day_columns_blank_when_hours_equal_reference(self) -> None:
         processor = FichaFinanceiraProcessor()
@@ -135,7 +138,65 @@ class HorasTrabalhadasCsvTest(unittest.TestCase):
 
             content = output_path.read_text(encoding="utf-8").strip().splitlines()
 
-        self.assertEqual("05/2024;0;0;0;30", content[1])
+        self.assertEqual("05/2024;200;0;0;30", content[1])
+
+    def test_adds_afastamento_columns_when_values_exist(self) -> None:
+        processor = FichaFinanceiraProcessor()
+        with TemporaryDirectory() as tmp_dir:
+            output_path = Path(tmp_dir) / "horas.csv"
+            processor._write_horas_trabalhadas_csv(
+                output_path,
+                months=[(2024, 6)],
+                horas=[(2024, 6, Decimal("180"))],
+                faltas=[],
+                horas_com_registro={(2024, 6)},
+                afastamentos=[
+                    {
+                        "label": "902-AFAST. DOENCA",
+                        "values": [(2024, 6, Decimal("10"))],
+                        "include": True,
+                    }
+                ],
+            )
+
+            content = output_path.read_text(encoding="utf-8").strip().splitlines()
+
+        self.assertEqual(
+            "PERIODO;HORAS TRAB.;FALTAS;902-AFAST. DOENCA;DIAS TRABALHADOS;DIAS FERIAS",
+            content[0],
+        )
+        self.assertEqual("06/2024;190;0;10;27;3", content[1])
+
+    def test_subtracts_all_afastamentos_from_hours_column(self) -> None:
+        processor = FichaFinanceiraProcessor()
+        with TemporaryDirectory() as tmp_dir:
+            output_path = Path(tmp_dir) / "horas.csv"
+            processor._write_horas_trabalhadas_csv(
+                output_path,
+                months=[(2024, 7)],
+                horas=[(2024, 7, Decimal("200"))],
+                faltas=[],
+                afastamentos=[
+                    {
+                        "label": "902-AFAST. DOENCA",
+                        "values": [(2024, 7, Decimal("10"))],
+                        "include": True,
+                    },
+                    {
+                        "label": "910-AFAST. MATERNIDADE",
+                        "values": [(2024, 7, Decimal("15"))],
+                        "include": True,
+                    },
+                ],
+            )
+
+            content = output_path.read_text(encoding="utf-8").strip().splitlines()
+
+        self.assertEqual(
+            "PERIODO;HORAS TRAB.;FALTAS;902-AFAST. DOENCA;910-AFAST. MATERNIDADE;DIAS TRABALHADOS;DIAS FERIAS",
+            content[0],
+        )
+        self.assertEqual("07/2024;175;0;10;15;;", content[1])
 
 
 if __name__ == "__main__":
