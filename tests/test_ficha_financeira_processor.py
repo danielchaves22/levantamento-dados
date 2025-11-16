@@ -199,5 +199,24 @@ class HorasTrabalhadasCsvTest(unittest.TestCase):
         self.assertEqual("07/2024;175;0;10;15;;", content[1])
 
 
+class CartoesCsvTest(unittest.TestCase):
+    def test_generates_csv_without_referencing_missing_variables(self) -> None:
+        processor = FichaFinanceiraProcessor()
+        with TemporaryDirectory() as tmp_dir:
+            output_path = Path(tmp_dir) / "cartoes.csv"
+            processor._write_cartoes_csv(
+                output_path,
+                months=[(2024, 1)],
+                horas_50=[(2024, 1, Decimal("10"))],
+                horas_100=[(2024, 2, Decimal("5"))],
+            )
+
+            content = output_path.read_text(encoding="utf-8").strip().splitlines()
+
+        self.assertEqual("PERIODO;HORA EXTRA 50%;HORA EXTRA 100%", content[0])
+        self.assertEqual("01/2024;10;0", content[1])
+        self.assertEqual("02/2024;0;5", content[2])
+
+
 if __name__ == "__main__":
     unittest.main()
