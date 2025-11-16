@@ -8,7 +8,7 @@ import unicodedata
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from datetime import date, datetime
-from decimal import Decimal, InvalidOperation
+from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 from pathlib import Path
 from typing import Callable, Dict, Iterable, List, Optional, Sequence, Set, Tuple
 
@@ -1241,10 +1241,10 @@ class FichaFinanceiraProcessor:
                         self._format_decimal(horas_planilha),
                         self._format_decimal(faltas_valor),
                         *afastamento_row_values,
-                        self._format_decimal(dias_trabalhados_valor)
+                        self._format_decimal(dias_trabalhados_valor, places=0)
                         if dias_trabalhados_valor is not None
                         else "",
-                        self._format_decimal(dias_ferias_valor)
+                        self._format_decimal(dias_ferias_valor, places=0)
                         if dias_ferias_valor is not None
                         else "",
                     ]
@@ -1284,10 +1284,13 @@ class FichaFinanceiraProcessor:
         ascii_text = re.sub(r"[^A-Za-z0-9_\-]", "", ascii_text)
         return ascii_text or "resultado"
 
-    def _format_decimal(self, value: Decimal) -> str:
-        quantized = value.quantize(Decimal("0.01"))
-        text = f"{quantized:.2f}".replace(".", ",")
-        text = text.rstrip("0").rstrip(",")
+    def _format_decimal(self, value: Decimal, *, places: int = 2) -> str:
+        quant = Decimal("1").scaleb(-places) if places > 0 else Decimal("1")
+        quantized = value.quantize(quant, rounding=ROUND_HALF_UP)
+        text = format(quantized, "f")
+        if places > 0:
+            text = text.rstrip("0").rstrip(".")
+        text = text.replace(".", ",")
         return text or "0"
 
     def _is_number(self, text: str) -> bool:
