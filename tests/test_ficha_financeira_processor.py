@@ -165,6 +165,28 @@ class HorasTrabalhadasCsvTest(unittest.TestCase):
             content[1],
         )
 
+    def test_calculates_vacation_using_hours_plus_afastamentos(self) -> None:
+        processor = FichaFinanceiraProcessor()
+        with TemporaryDirectory() as tmp_dir:
+            output_path = Path(tmp_dir) / "horas.csv"
+            processor._write_horas_trabalhadas_csv(
+                output_path,
+                months=[(2024, 9)],
+                horas=[(2024, 9, Decimal("100"))],
+                faltas=[],
+                afastamentos=[
+                    {
+                        "label": "902-AFAST. DOENCA",
+                        "values": [(2024, 9, Decimal("50"))],
+                        "include": True,
+                    }
+                ],
+            )
+
+            content = output_path.read_text(encoding="utf-8").strip().splitlines()
+
+        self.assertEqual("09/2024;150;0;150;50;23;8", content[1])
+
     def test_adds_afastamento_columns_when_values_exist(self) -> None:
         processor = FichaFinanceiraProcessor()
         with TemporaryDirectory() as tmp_dir:
@@ -189,7 +211,7 @@ class HorasTrabalhadasCsvTest(unittest.TestCase):
             "PERIODO;HORAS TRAB.;FALTAS;SALDO HORAS;902-AFAST. DOENCA;DIAS TRABALHADOS;DIAS FERIAS",
             content[0],
         )
-        self.assertEqual("06/2024;190;0;190;10;27;3", content[1])
+        self.assertEqual("06/2024;190;0;190;10;29;2", content[1])
 
     def test_subtracts_all_afastamentos_from_hours_column(self) -> None:
         processor = FichaFinanceiraProcessor()

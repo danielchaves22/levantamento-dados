@@ -1239,7 +1239,7 @@ class FichaFinanceiraProcessor:
                 horas_para_ferias = horas_valor + total_afastamentos
                 if periodo_na_ficha and horas_para_ferias < horas_referencia:
                     dias_trabalhados_valor = (
-                        (horas_valor * dias_referencia) / horas_referencia
+                        (horas_para_ferias * dias_referencia) / horas_referencia
                     )
                     dias_ferias_valor = dias_referencia - dias_trabalhados_valor
 
