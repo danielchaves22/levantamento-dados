@@ -309,6 +309,10 @@ class FichaFinanceiraProcessor:
     ) -> List[Dict[str, object]]:
         outputs: List[Dict[str, object]] = []
 
+        meses_registrados: Set[Tuple[int, int]] = set()
+        for values in aggregated.values():
+            meses_registrados.update(values.keys())
+
         for spec in self.OUTPUT_SPECS:
             output_path = target_dir / f"{spec['label']}_{file_slug}.csv"
             writer = spec.get("writer", "default")
@@ -406,6 +410,7 @@ class FichaFinanceiraProcessor:
                     months_range,
                     horas_values,
                     faltas_values,
+                    meses_registrados=meses_registrados,
                     afastamentos=afastamentos_series,
                 )
             else:
@@ -1139,10 +1144,14 @@ class FichaFinanceiraProcessor:
         horas: Iterable[Tuple[int, int, Decimal]],
         faltas: Iterable[Tuple[int, int, Decimal]],
         *,
+        meses_registrados: Optional[Set[Tuple[int, int]]] = None,
         afastamentos: Optional[List[Dict[str, object]]] = None,
     ) -> None:
         horas_map = {(year, month): value for year, month, value in horas}
         faltas_map = {(year, month): value for year, month, value in faltas}
+        meses_registrados_set = (
+            set(meses_registrados) if meses_registrados is not None else None
+        )
 
         ordered_months: List[Tuple[int, int]] = list(months)
 
@@ -1222,8 +1231,13 @@ class FichaFinanceiraProcessor:
                 dias_trabalhados_valor = None
                 dias_ferias_valor = None
 
+                periodo_na_ficha = (
+                    meses_registrados_set is None
+                    or (year, month) in meses_registrados_set
+                )
+
                 horas_para_ferias = horas_valor + total_afastamentos
-                if horas_para_ferias < horas_referencia:
+                if periodo_na_ficha and horas_para_ferias < horas_referencia:
                     dias_trabalhados_valor = (
                         (horas_valor * dias_referencia) / horas_referencia
                     )
