@@ -102,11 +102,28 @@ class HorasTrabalhadasCsvTest(unittest.TestCase):
                 months=[(2024, 3)],
                 horas=[],
                 faltas=[],
+                meses_registrados=set(),
             )
 
             content = output_path.read_text(encoding="utf-8").strip().splitlines()
 
-        self.assertEqual("03/2024;200;0;200;0;30", content[1])
+        self.assertEqual("03/2024;200;0;200;;", content[1])
+
+    def test_calculates_vacation_when_month_exists_even_if_hours_missing(self) -> None:
+        processor = FichaFinanceiraProcessor()
+        with TemporaryDirectory() as tmp_dir:
+            output_path = Path(tmp_dir) / "horas.csv"
+            processor._write_horas_trabalhadas_csv(
+                output_path,
+                months=[(2024, 8)],
+                horas=[],
+                faltas=[],
+                meses_registrados={(2024, 8)},
+            )
+
+            content = output_path.read_text(encoding="utf-8").strip().splitlines()
+
+        self.assertEqual("08/2024;200;0;200;0;30", content[1])
 
     def test_calculates_full_vacation_when_hours_zero(self) -> None:
         processor = FichaFinanceiraProcessor()
