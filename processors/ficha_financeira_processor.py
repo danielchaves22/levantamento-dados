@@ -406,7 +406,6 @@ class FichaFinanceiraProcessor:
                     months_range,
                     horas_values,
                     faltas_values,
-                    horas_registradas,
                     afastamentos=afastamentos_series,
                 )
             else:
@@ -1139,16 +1138,11 @@ class FichaFinanceiraProcessor:
         months: Iterable[Tuple[int, int]],
         horas: Iterable[Tuple[int, int, Decimal]],
         faltas: Iterable[Tuple[int, int, Decimal]],
-        horas_com_registro: Optional[Set[Tuple[int, int]]] = None,
         *,
         afastamentos: Optional[List[Dict[str, object]]] = None,
     ) -> None:
         horas_map = {(year, month): value for year, month, value in horas}
         faltas_map = {(year, month): value for year, month, value in faltas}
-
-        meses_registrados = (
-            set(horas_com_registro) if horas_com_registro is not None else None
-        )
 
         ordered_months: List[Tuple[int, int]] = list(months)
 
@@ -1188,6 +1182,7 @@ class FichaFinanceiraProcessor:
             "PERIODO",
             "HORAS TRAB.",
             "FALTAS",
+            "SALDO HORAS",
             *afastamento_headers,
             "DIAS TRABALHADOS",
             "DIAS FERIAS",
@@ -1202,13 +1197,9 @@ class FichaFinanceiraProcessor:
 
             for year, month in ordered_months:
                 mes_ano = f"{month:02d}/{year}"
-                horas_valor = horas_map.get((year, month))
-                tem_registro = (
-                    meses_registrados is None
-                    or (year, month) in meses_registrados
+                horas_valor = horas_map.get(
+                    (year, month), Decimal("0")
                 )
-                if horas_valor is None or not tem_registro:
-                    horas_valor = horas_referencia
                 faltas_valor = faltas_map.get((year, month), Decimal("0"))
                 total_afastamentos = Decimal("0")
                 afastamento_row_values: List[str] = []
@@ -1226,10 +1217,13 @@ class FichaFinanceiraProcessor:
                 if horas_planilha < Decimal("0"):
                     horas_planilha = Decimal("0")
 
+                saldo_horas = horas_planilha - faltas_valor
+
                 dias_trabalhados_valor = None
                 dias_ferias_valor = None
 
-                if horas_valor != horas_referencia:
+                horas_para_ferias = horas_valor + total_afastamentos
+                if horas_para_ferias < horas_referencia:
                     dias_trabalhados_valor = (
                         (horas_valor * dias_referencia) / horas_referencia
                     )
@@ -1240,6 +1234,7 @@ class FichaFinanceiraProcessor:
                         mes_ano,
                         self._format_decimal(horas_planilha),
                         self._format_decimal(faltas_valor),
+                        self._format_decimal(saldo_horas),
                         *afastamento_row_values,
                         self._format_decimal(dias_trabalhados_valor, places=0)
                         if dias_trabalhados_valor is not None

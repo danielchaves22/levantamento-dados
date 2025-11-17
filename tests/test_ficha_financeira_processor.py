@@ -73,10 +73,10 @@ class HorasTrabalhadasCsvTest(unittest.TestCase):
             content = output_path.read_text(encoding="utf-8").strip().splitlines()
 
         self.assertEqual(
-            "PERIODO;HORAS TRAB.;FALTAS;DIAS TRABALHADOS;DIAS FERIAS",
+            "PERIODO;HORAS TRAB.;FALTAS;SALDO HORAS;DIAS TRABALHADOS;DIAS FERIAS",
             content[0],
         )
-        self.assertEqual("01/2024;200;0;27;3", content[1])
+        self.assertEqual("01/2024;200;0;200;27;3", content[1])
 
     def test_leaves_day_columns_blank_when_hours_equal_reference(self) -> None:
         processor = FichaFinanceiraProcessor()
@@ -91,7 +91,7 @@ class HorasTrabalhadasCsvTest(unittest.TestCase):
 
             content = output_path.read_text(encoding="utf-8").strip().splitlines()
 
-        self.assertEqual("02/2024;200;5;;", content[1])
+        self.assertEqual("02/2024;200;5;195;;", content[1])
 
     def test_defaults_hours_to_reference_when_month_has_no_data(self) -> None:
         processor = FichaFinanceiraProcessor()
@@ -106,9 +106,9 @@ class HorasTrabalhadasCsvTest(unittest.TestCase):
 
             content = output_path.read_text(encoding="utf-8").strip().splitlines()
 
-        self.assertEqual("03/2024;200;0;;", content[1])
+        self.assertEqual("03/2024;200;0;200;0;30", content[1])
 
-    def test_defaults_hours_to_reference_when_zero_is_placeholder(self) -> None:
+    def test_calculates_full_vacation_when_hours_zero(self) -> None:
         processor = FichaFinanceiraProcessor()
         with TemporaryDirectory() as tmp_dir:
             output_path = Path(tmp_dir) / "horas.csv"
@@ -117,28 +117,36 @@ class HorasTrabalhadasCsvTest(unittest.TestCase):
                 months=[(2024, 4)],
                 horas=[(2024, 4, Decimal("0"))],
                 faltas=[],
-                horas_com_registro=set(),
             )
 
             content = output_path.read_text(encoding="utf-8").strip().splitlines()
 
-        self.assertEqual("04/2024;200;0;;", content[1])
+        self.assertEqual("04/2024;200;0;200;0;30", content[1])
 
-    def test_keeps_zero_hours_when_month_has_registered_value(self) -> None:
+    def test_does_not_count_vacation_when_hours_plus_afast_equals_reference(self) -> None:
         processor = FichaFinanceiraProcessor()
         with TemporaryDirectory() as tmp_dir:
             output_path = Path(tmp_dir) / "horas.csv"
             processor._write_horas_trabalhadas_csv(
                 output_path,
                 months=[(2024, 5)],
-                horas=[(2024, 5, Decimal("0"))],
+                horas=[(2024, 5, Decimal("150"))],
                 faltas=[],
-                horas_com_registro={(2024, 5)},
+                afastamentos=[
+                    {
+                        "label": "902-AFAST. DOENCA",
+                        "values": [(2024, 5, Decimal("50"))],
+                        "include": True,
+                    }
+                ],
             )
 
             content = output_path.read_text(encoding="utf-8").strip().splitlines()
 
-        self.assertEqual("05/2024;200;0;0;30", content[1])
+        self.assertEqual(
+            "05/2024;150;0;150;50;;",
+            content[1],
+        )
 
     def test_adds_afastamento_columns_when_values_exist(self) -> None:
         processor = FichaFinanceiraProcessor()
@@ -149,7 +157,6 @@ class HorasTrabalhadasCsvTest(unittest.TestCase):
                 months=[(2024, 6)],
                 horas=[(2024, 6, Decimal("180"))],
                 faltas=[],
-                horas_com_registro={(2024, 6)},
                 afastamentos=[
                     {
                         "label": "902-AFAST. DOENCA",
@@ -162,10 +169,10 @@ class HorasTrabalhadasCsvTest(unittest.TestCase):
             content = output_path.read_text(encoding="utf-8").strip().splitlines()
 
         self.assertEqual(
-            "PERIODO;HORAS TRAB.;FALTAS;902-AFAST. DOENCA;DIAS TRABALHADOS;DIAS FERIAS",
+            "PERIODO;HORAS TRAB.;FALTAS;SALDO HORAS;902-AFAST. DOENCA;DIAS TRABALHADOS;DIAS FERIAS",
             content[0],
         )
-        self.assertEqual("06/2024;190;0;10;27;3", content[1])
+        self.assertEqual("06/2024;190;0;190;10;27;3", content[1])
 
     def test_subtracts_all_afastamentos_from_hours_column(self) -> None:
         processor = FichaFinanceiraProcessor()
@@ -193,10 +200,10 @@ class HorasTrabalhadasCsvTest(unittest.TestCase):
             content = output_path.read_text(encoding="utf-8").strip().splitlines()
 
         self.assertEqual(
-            "PERIODO;HORAS TRAB.;FALTAS;902-AFAST. DOENCA;910-AFAST. MATERNIDADE;DIAS TRABALHADOS;DIAS FERIAS",
+            "PERIODO;HORAS TRAB.;FALTAS;SALDO HORAS;902-AFAST. DOENCA;910-AFAST. MATERNIDADE;DIAS TRABALHADOS;DIAS FERIAS",
             content[0],
         )
-        self.assertEqual("07/2024;175;0;10;15;;", content[1])
+        self.assertEqual("07/2024;175;0;175;10;15;;", content[1])
 
 
 class CartoesCsvTest(unittest.TestCase):
