@@ -1,4 +1,3 @@
-*.xlsm
 .env
 __pycache__
 /build
