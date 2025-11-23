@@ -37,10 +37,12 @@ class PlanilhaDadosProcessor:
     REMUNERACAO_FILENAME = "REMUNERAÇÃO RECEBIDA.csv"
     PRODUCAO_FILENAME = "PRODUÇÃO.csv"
     CARTOES_FILENAME = "CARTÕES.csv"
+    ADC_LABEL = "ADIC.NOT"
 
     def __init__(self, log_callback: Optional[LogCallback] = None) -> None:
         self.log_callback = log_callback or (lambda msg: None)
         self.he_labels: List[str] = []
+        self.cartoes_labels: List[str] = []
 
     # ------------------------------------------------------------------
     # API pública
@@ -93,6 +95,13 @@ class PlanilhaDadosProcessor:
         producao_idx = self._find_column(header, "PRODUÇÃO")
         he_columns = self._find_he_columns(header)
         adc_formula_idx = self._find_adc_formula_column(header)
+
+        self.cartoes_labels = [
+            label
+            for label, _ in sorted(
+                [*he_columns, (self.ADC_LABEL, adc_formula_idx)], key=lambda item: item[1]
+            )
+        ]
 
         rows: List[PlanilhaRow] = []
         for excel_row in ws.iter_rows(
@@ -259,15 +268,17 @@ class PlanilhaDadosProcessor:
 
     def _write_cartoes_csv(self, rows: Iterable[PlanilhaRow], output_path: Path) -> None:
         with output_path.open("w", encoding="latin-1", newline="") as fp:
-            header = ["PERÍODO", *self.he_labels, "ADIC.NOT"]
+            header = ["PERÍODO", *self.cartoes_labels]
             fp.write(";".join(header) + "\n")
             for row in rows:
-                he_values = [self._format_decimal(row.he_formulas.get(label)) for label in self.he_labels]
-                fp.write(
-                    f"{self._format_mes_ano(row.periodo)};"
-                    + ";".join(he_values)
-                    + f";{self._format_decimal(row.adc_formula)}\n"
-                )
+                values: List[str] = []
+                for label in self.cartoes_labels:
+                    if label == self.ADC_LABEL:
+                        values.append(self._format_decimal(row.adc_formula))
+                    else:
+                        values.append(self._format_decimal(row.he_formulas.get(label)))
+
+                fp.write(f"{self._format_mes_ano(row.periodo)};" + ";".join(values) + "\n")
 
     @staticmethod
     def _format_mes_ano(date_value: datetime) -> str:

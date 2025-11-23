@@ -61,4 +61,4 @@ def test_planilha_dados_processor_detects_optional_he_columns(tmp_path: Path) ->
     processor.process(output_wb, tmp_path)
 
     cartoes = (tmp_path / PlanilhaDadosProcessor.CARTOES_FILENAME).read_text(encoding="latin-1")
-    assert cartoes == "PERÍODO;HE 100%;HE 75%;HE 50%;ADIC.NOT\n01/2020;8,5;1,5;0;0,75\n"
+    assert cartoes == "PERÍODO;HE 100%;ADIC.NOT;HE 75%;HE 50%\n01/2020;8,5;0,75;1,5;0\n"
