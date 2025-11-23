@@ -36,11 +36,11 @@ def test_planilha_dados_processor_detects_optional_he_columns(tmp_path: Path) ->
         "PRODUÇÃO",
         "INDICE HE 100%",
         "FORMULA",
+        "INDICE HE 50%",
+        "FORMULA",
         "INDICE ADC. NOT.",
         "FORMULA",
         "INDICE 75%",
-        "FORMULA",
-        "INDICE HE 50%",
         "FORMULA",
     ]
 
@@ -51,9 +51,9 @@ def test_planilha_dados_processor_detects_optional_he_columns(tmp_path: Path) ->
     ws.cell(row=processor.DATA_START_ROW, column=2, value=100)
     ws.cell(row=processor.DATA_START_ROW, column=3, value=200)
     ws.cell(row=processor.DATA_START_ROW, column=5, value=8.5)  # HE 100% calculado
-    ws.cell(row=processor.DATA_START_ROW, column=7, value=0.75)  # ADC. NOT.
-    ws.cell(row=processor.DATA_START_ROW, column=9, value=1.5)  # HE 75%
-    ws.cell(row=processor.DATA_START_ROW, column=11, value=None)  # HE 50% vazio
+    ws.cell(row=processor.DATA_START_ROW, column=7, value=0.75)  # HE 50%
+    ws.cell(row=processor.DATA_START_ROW, column=9, value=0.25)  # ADC. NOT.
+    ws.cell(row=processor.DATA_START_ROW, column=11, value=1.5)  # HE 75%
 
     output_wb = tmp_path / "planilha_teste.xlsx"
     wb.save(output_wb)
@@ -61,4 +61,7 @@ def test_planilha_dados_processor_detects_optional_he_columns(tmp_path: Path) ->
     processor.process(output_wb, tmp_path)
 
     cartoes = (tmp_path / PlanilhaDadosProcessor.CARTOES_FILENAME).read_text(encoding="latin-1")
-    assert cartoes == "PERÍODO;HE 100%;ADIC.NOT;HE 75%;HE 50%\n01/2020;8,5;0,75;1,5;0\n"
+    assert (
+        cartoes
+        == "PERÍODO;HE 100%;HE 50%;ADIC.NOT;HE 75%\n01/2020;8,5;0,75;0,25;1,5\n"
+    )

@@ -25,6 +25,15 @@ class PlanilhaRow:
     adc_formula: Optional[Decimal]
 
 
+@dataclass
+class HeColumn:
+    """Representa uma coluna de índice de horas extras e sua fórmula."""
+
+    label: str
+    label_idx: int
+    formula_idx: int
+
+
 class PlanilhaDadosProcessor:
     """Extrai dados da aba "LEVANTAMENTO DADOS" e gera os CSVs finais."""
 
@@ -94,14 +103,18 @@ class PlanilhaDadosProcessor:
         remuneracao_idx = self._find_column(header, "REMUNERAÇÃO RECEBIDA")
         producao_idx = self._find_column(header, "PRODUÇÃO")
         he_columns = self._find_he_columns(header)
-        adc_formula_idx = self._find_adc_formula_column(header)
+        adc_column_idx, adc_formula_idx = self._find_adc_formula_column(header)
 
-        self.cartoes_labels = [
-            label
-            for label, _ in sorted(
-                [*he_columns, (self.ADC_LABEL, adc_formula_idx)], key=lambda item: item[1]
-            )
-        ]
+        ordered_columns = sorted(
+            [
+                (column.label, column.label_idx, column.formula_idx)
+                for column in he_columns
+            ]
+            + [(self.ADC_LABEL, adc_column_idx, adc_formula_idx)],
+            key=lambda item: item[1],
+        )
+
+        self.cartoes_labels = [label for label, _, _ in ordered_columns]
 
         rows: List[PlanilhaRow] = []
         for excel_row in ws.iter_rows(
@@ -119,7 +132,8 @@ class PlanilhaDadosProcessor:
             remuneracao = self._to_decimal(excel_row[remuneracao_idx])
             producao = self._to_decimal(excel_row[producao_idx])
             he_values = {
-                label: self._to_decimal(excel_row[col_index]) for label, col_index in he_columns
+                column.label: self._to_decimal(excel_row[column.formula_idx])
+                for column in he_columns
             }
             adc_formula = self._to_decimal(excel_row[adc_formula_idx])
 
@@ -139,14 +153,14 @@ class PlanilhaDadosProcessor:
 
         return rows
 
-    def _find_he_columns(self, header: List[Optional[str]]) -> List[tuple[str, int]]:
+    def _find_he_columns(self, header: List[Optional[str]]) -> List[HeColumn]:
         """Identifica colunas de HE (100%, 75%, 50%) e seus valores de fórmula.
 
         O valor exportado sempre vem da coluna de fórmula imediatamente à direita do
         índice. Aceita rótulos "INDICE XX%" ou "INDICE HE XX%".
         """
 
-        he_columns: List[tuple[str, int]] = []
+        he_columns: List[HeColumn] = []
 
         for idx, value in enumerate(header):
             if not isinstance(value, str):
@@ -164,13 +178,13 @@ class PlanilhaDadosProcessor:
                     f"Coluna de fórmula não encontrada ao lado de '{value}' na posição {idx}"
                 )
 
-            he_columns.append((label, formula_idx))
+            he_columns.append(HeColumn(label=label, label_idx=idx, formula_idx=formula_idx))
 
         if not he_columns:
             raise ValueError("Nenhuma coluna de HE encontrada no cabeçalho")
 
         # Mantém a ordem conforme aparecem na planilha
-        self.he_labels = [label for label, _ in he_columns]
+        self.he_labels = [column.label for column in he_columns]
         return he_columns
 
     @staticmethod
@@ -180,13 +194,13 @@ class PlanilhaDadosProcessor:
                 return idx
         raise ValueError(f"Coluna '{name}' não encontrada no cabeçalho")
 
-    def _find_adc_formula_column(self, header: List[Optional[str]]) -> int:
+    def _find_adc_formula_column(self, header: List[Optional[str]]) -> tuple[int, int]:
         for idx, value in enumerate(header):
             if value == "INDICE ADC. NOT.":
                 formula_idx = idx + 1
                 if formula_idx >= len(header) or header[formula_idx] != "FORMULA":
                     raise ValueError("Coluna de fórmula do ADC. NOT. não localizada")
-                return formula_idx
+                return idx, formula_idx
 
         raise ValueError("Coluna 'INDICE ADC. NOT.' não encontrada no cabeçalho")
 
