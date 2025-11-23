@@ -1354,12 +1354,12 @@ class DropZoneWidget(QWidget):
         files = []
         for url in event.mimeData().urls():
             file_path = url.toLocalFile()
-            if file_path.lower().endswith('.pdf'):
+            if any(file_path.lower().endswith(ext) for ext in self.allowed_extensions):
                 files.append(file_path)
-        
+
         if files:
             self.files_dropped.emit(files)
-        
+
         event.acceptProposedAction()
         self.label.setStyleSheet(self.label.styleSheet().replace("border-color: #2cc985;", ""))
 
@@ -2755,8 +2755,7 @@ class MainWindow(QMainWindow):
         )
 
         if files:
-            self.selected_files = files
-            self.update_selected_files_display()
+            self._add_selected_files(files)
     
     def clear_selection(self):
         """Limpa seleção de arquivos"""
@@ -2767,11 +2766,25 @@ class MainWindow(QMainWindow):
         """Manipula arquivos arrastados"""
         if self.project_model == ProjectManager.MODEL_PLANILHA:
             allowed_ext = ('.xls', '.xlsx', '.xlsm')
-            self.selected_files = [f for f in files if f.lower().endswith(allowed_ext)]
+            filtered = [f for f in files if f.lower().endswith(allowed_ext)]
+            self._add_selected_files(filtered)
         elif self.project_model == ProjectManager.MODEL_FICHA:
-            self.selected_files = [f for f in files if f.lower().endswith('.pdf')]
+            filtered = [f for f in files if f.lower().endswith('.pdf')]
+            self._add_selected_files(filtered)
         else:
-            self.selected_files = files
+            self._add_selected_files(files)
+
+    def _add_selected_files(self, files: List[str]):
+        """Adiciona novos arquivos sem perder a seleção atual."""
+        if not files:
+            return
+
+        existing = set(self.selected_files)
+        for file_path in files:
+            if file_path not in existing:
+                self.selected_files.append(file_path)
+                existing.add(file_path)
+
         self.update_selected_files_display()
     
     def update_selected_files_display(self):
