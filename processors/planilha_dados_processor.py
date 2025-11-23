@@ -7,6 +7,7 @@ from datetime import datetime, time, timedelta
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Callable, Iterable, List, Optional
+import re
 
 from openpyxl import load_workbook
 
@@ -20,7 +21,7 @@ class PlanilhaRow:
     periodo: datetime
     remuneracao: Optional[Decimal]
     producao: Optional[Decimal]
-    he_formula: Optional[Decimal]
+    he_formulas: dict[str, Optional[Decimal]]
     adc_formula: Optional[Decimal]
 
 
@@ -31,12 +32,15 @@ class PlanilhaDadosProcessor:
     HEADER_ROW = 4
     DATA_START_ROW = 5
 
+    HE_INDEX_PATTERN = re.compile(r"INDICE(?: HE)?\s*(\d+)%", re.IGNORECASE)
+
     REMUNERACAO_FILENAME = "REMUNERAÇÃO RECEBIDA.csv"
     PRODUCAO_FILENAME = "PRODUÇÃO.csv"
     CARTOES_FILENAME = "CARTÕES.csv"
 
     def __init__(self, log_callback: Optional[LogCallback] = None) -> None:
         self.log_callback = log_callback or (lambda msg: None)
+        self.he_labels: List[str] = []
 
     # ------------------------------------------------------------------
     # API pública
@@ -87,8 +91,8 @@ class PlanilhaDadosProcessor:
         period_idx = self._find_column(header, "PERÍODO")
         remuneracao_idx = self._find_column(header, "REMUNERAÇÃO RECEBIDA")
         producao_idx = self._find_column(header, "PRODUÇÃO")
-        he_formula_idx = self._find_column(header, "FORMULA", occurrence=1)
-        adc_formula_idx = self._find_column(header, "FORMULA", occurrence=2)
+        he_columns = self._find_he_columns(header)
+        adc_formula_idx = self._find_adc_formula_column(header)
 
         rows: List[PlanilhaRow] = []
         for excel_row in ws.iter_rows(
@@ -105,11 +109,13 @@ class PlanilhaDadosProcessor:
 
             remuneracao = self._to_decimal(excel_row[remuneracao_idx])
             producao = self._to_decimal(excel_row[producao_idx])
-            he_formula = self._to_decimal(excel_row[he_formula_idx])
+            he_values = {
+                label: self._to_decimal(excel_row[col_index]) for label, col_index in he_columns
+            }
             adc_formula = self._to_decimal(excel_row[adc_formula_idx])
 
             # Ignora linhas sem qualquer informação relevante (apenas datas)
-            if not self._has_relevant_data(remuneracao, producao, he_formula, adc_formula):
+            if not self._has_relevant_data(remuneracao, producao, he_values, adc_formula):
                 continue
 
             rows.append(
@@ -117,21 +123,63 @@ class PlanilhaDadosProcessor:
                     periodo=periodo,
                     remuneracao=remuneracao,
                     producao=producao,
-                    he_formula=he_formula,
+                    he_formulas=he_values,
                     adc_formula=adc_formula,
                 )
             )
 
         return rows
 
-    def _find_column(self, header: List[Optional[str]], name: str, *, occurrence: int = 1) -> int:
-        count = 0
+    def _find_he_columns(self, header: List[Optional[str]]) -> List[tuple[str, int]]:
+        """Identifica colunas de HE (100%, 75%, 50%) e seus valores de fórmula.
+
+        O valor exportado sempre vem da coluna de fórmula imediatamente à direita do
+        índice. Aceita rótulos "INDICE XX%" ou "INDICE HE XX%".
+        """
+
+        he_columns: List[tuple[str, int]] = []
+
+        for idx, value in enumerate(header):
+            if not isinstance(value, str):
+                continue
+
+            match = self.HE_INDEX_PATTERN.match(value.strip())
+            if not match:
+                continue
+
+            percent = match.group(1)
+            label = f"HE {percent}%"
+            formula_idx = idx + 1
+            if formula_idx >= len(header) or header[formula_idx] != "FORMULA":
+                raise ValueError(
+                    f"Coluna de fórmula não encontrada ao lado de '{value}' na posição {idx}"
+                )
+
+            he_columns.append((label, formula_idx))
+
+        if not he_columns:
+            raise ValueError("Nenhuma coluna de HE encontrada no cabeçalho")
+
+        # Mantém a ordem conforme aparecem na planilha
+        self.he_labels = [label for label, _ in he_columns]
+        return he_columns
+
+    @staticmethod
+    def _find_column(header: List[Optional[str]], name: str) -> int:
         for idx, value in enumerate(header):
             if value == name:
-                count += 1
-                if count == occurrence:
-                    return idx
-        raise ValueError(f"Coluna '{name}' (ocorrência {occurrence}) não encontrada no cabeçalho")
+                return idx
+        raise ValueError(f"Coluna '{name}' não encontrada no cabeçalho")
+
+    def _find_adc_formula_column(self, header: List[Optional[str]]) -> int:
+        for idx, value in enumerate(header):
+            if value == "INDICE ADC. NOT.":
+                formula_idx = idx + 1
+                if formula_idx >= len(header) or header[formula_idx] != "FORMULA":
+                    raise ValueError("Coluna de fórmula do ADC. NOT. não localizada")
+                return formula_idx
+
+        raise ValueError("Coluna 'INDICE ADC. NOT.' não encontrada no cabeçalho")
 
     @staticmethod
     def _is_within_range(
@@ -177,15 +225,15 @@ class PlanilhaDadosProcessor:
     def _has_relevant_data(
         remuneracao: Optional[Decimal],
         producao: Optional[Decimal],
-        he_formula: Optional[Decimal],
+        he_formulas: dict[str, Optional[Decimal]],
         adc_formula: Optional[Decimal],
     ) -> bool:
-        values = (remuneracao, producao, he_formula, adc_formula)
+        values = [remuneracao, producao, adc_formula, *he_formulas.values()]
         if not any(value not in (None, Decimal("0")) for value in values):
             return False
 
         # Linhas com apenas remuneração, sem nenhuma produção ou fórmula preenchida, são ignoradas
-        if producao is None and he_formula is None and adc_formula is None:
+        if producao is None and all(v is None for v in he_formulas.values()) and adc_formula is None:
             return False
 
         return True
@@ -211,10 +259,14 @@ class PlanilhaDadosProcessor:
 
     def _write_cartoes_csv(self, rows: Iterable[PlanilhaRow], output_path: Path) -> None:
         with output_path.open("w", encoding="latin-1", newline="") as fp:
-            fp.write("PERÍODO;HE 100%;ADIC.NOT\n")
+            header = ["PERÍODO", *self.he_labels, "ADIC.NOT"]
+            fp.write(";".join(header) + "\n")
             for row in rows:
+                he_values = [self._format_decimal(row.he_formulas.get(label)) for label in self.he_labels]
                 fp.write(
-                    f"{self._format_mes_ano(row.periodo)};{self._format_decimal(row.he_formula)};{self._format_decimal(row.adc_formula)}\n"
+                    f"{self._format_mes_ano(row.periodo)};"
+                    + ";".join(he_values)
+                    + f";{self._format_decimal(row.adc_formula)}\n"
                 )
 
     @staticmethod
