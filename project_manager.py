@@ -43,6 +43,7 @@ class ProjectManager:
 
     MODEL_RECIBO = "recibo_modelo_1"
     MODEL_FICHA = "ficha_financeira"
+    MODEL_PLANILHA = "planilha_dados"
 
     def __init__(self, app_dir: Optional[Path] = None) -> None:
         if app_dir is None:
@@ -213,7 +214,7 @@ class ProjectManager:
             self._write_projects_file({"projects": [], "last_selected": None})
 
     def _validate_model(self, model: str) -> None:
-        if model not in {self.MODEL_RECIBO, self.MODEL_FICHA}:
+        if model not in {self.MODEL_RECIBO, self.MODEL_FICHA, self.MODEL_PLANILHA}:
             raise ValueError("Modelo de projeto inválido.")
 
     def _validate_name(self, name: str) -> None:

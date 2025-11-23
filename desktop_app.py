@@ -72,6 +72,7 @@ from PyQt6.QtGui import (
 try:
     from pdf_processor_core import PDFProcessorCore
     from processors.ficha_financeira_processor import FichaFinanceiraProcessor
+    from processors.planilha_dados_processor import PlanilhaDadosProcessor
     from project_manager import ProjectManager, ProjectMetadata, MONTH_NAMES
 except ImportError:
     print("ERRO: Módulo pdf_processor_core.py não encontrado!")
@@ -340,6 +341,7 @@ class ProjectCreationDialog(QDialog):
         self.model_combo = QComboBox()
         self.model_combo.addItem("Recibo Modelo 1", ProjectManager.MODEL_RECIBO)
         self.model_combo.addItem("Ficha Financeira", ProjectManager.MODEL_FICHA)
+        self.model_combo.addItem("Planilha de Dados", ProjectManager.MODEL_PLANILHA)
         form_layout.addRow("Modelo:", self.model_combo)
 
         self.start_month_combo = QComboBox()
@@ -409,6 +411,7 @@ class ProjectListItemWidget(QWidget):
     MODEL_LABELS = {
         ProjectManager.MODEL_RECIBO: "Recibo Modelo 1",
         ProjectManager.MODEL_FICHA: "Ficha Financeira",
+        ProjectManager.MODEL_PLANILHA: "Planilha de Dados",
     }
 
     def __init__(self, project: ProjectMetadata, open_callback: Optional[Callable[[str], None]] = None):
@@ -1207,20 +1210,108 @@ class FichaFinanceiraBatchThread(QThread):
         self.log_message.emit(message)
 
 
+class PlanilhaDadosBatchThread(QThread):
+    """Thread dedicada ao processamento das planilhas de dados."""
+
+    progress_updated = pyqtSignal(str, int, str)
+    pdf_completed = pyqtSignal(str, dict)
+    batch_completed = pyqtSignal()
+    log_message = pyqtSignal(str)
+
+    def __init__(
+        self,
+        workbooks: List[str],
+        start_period: date,
+        end_period: date,
+        output_dir: str,
+        max_workers: int,
+    ) -> None:
+        super().__init__()
+        self.workbooks = [str(path) for path in workbooks]
+        self.start_period = start_period
+        self.end_period = end_period
+        self.output_dir = Path(output_dir)
+        self.max_workers = max(1, max_workers)
+
+    def run(self):
+        self.output_dir.mkdir(parents=True, exist_ok=True)
+
+        def process_single(workbook_path: str) -> dict:
+            filename = Path(workbook_path).name
+            target_dir = self.output_dir / Path(workbook_path).stem
+            target_dir.mkdir(parents=True, exist_ok=True)
+
+            processor = PlanilhaDadosProcessor(log_callback=lambda msg: self._emit_log(filename, msg))
+            self.progress_updated.emit(filename, 0, "Preparando arquivo...")
+
+            try:
+                processor.process(
+                    workbook_path,
+                    target_dir,
+                    start_period=(self.start_period.year, self.start_period.month),
+                    end_period=(self.end_period.year, self.end_period.month),
+                )
+
+                outputs = [
+                    {
+                        'label': 'REMUNERAÇÃO RECEBIDA',
+                        'path': str(target_dir / PlanilhaDadosProcessor.REMUNERACAO_FILENAME),
+                    },
+                    {
+                        'label': 'PRODUÇÃO',
+                        'path': str(target_dir / PlanilhaDadosProcessor.PRODUCAO_FILENAME),
+                    },
+                    {
+                        'label': 'CARTÕES',
+                        'path': str(target_dir / PlanilhaDadosProcessor.CARTOES_FILENAME),
+                    },
+                ]
+
+                self.progress_updated.emit(filename, 100, "✅ CSVs gerados")
+                return {
+                    'success': True,
+                    'output_folder': str(target_dir),
+                    'outputs': outputs,
+                    'processor': 'planilha_dados',
+                }
+            except Exception as exc:
+                self.progress_updated.emit(filename, 0, f"❌ Erro: {exc}")
+                return {'success': False, 'error': str(exc), 'processor': 'planilha_dados'}
+
+        try:
+            with ThreadPoolExecutor(max_workers=self.max_workers) as executor:
+                future_map = {executor.submit(process_single, wb): wb for wb in self.workbooks}
+                for future in as_completed(future_map):
+                    workbook = future_map[future]
+                    filename = Path(workbook).name
+                    try:
+                        result = future.result()
+                    except Exception as exc:  # salvaguarda
+                        result = {'success': False, 'error': str(exc), 'processor': 'planilha_dados'}
+                        self.progress_updated.emit(filename, 0, f"❌ Erro inesperado: {exc}")
+                    self.pdf_completed.emit(filename, result)
+        finally:
+            self.batch_completed.emit()
+
+    def _emit_log(self, filename: str, message: str) -> None:
+        self.log_message.emit(f"[{filename}] {message}")
+
+
 class DropZoneWidget(QWidget):
-    """Widget para drag & drop de arquivos PDF"""
-    
+    """Widget para drag & drop de arquivos configurável."""
+
     files_dropped = pyqtSignal(list)
-    
-    def __init__(self):
+
+    def __init__(self, *, label: str = "🎯 Arraste arquivos aqui ou clique para selecionar", extensions: Optional[List[str]] = None):
         super().__init__()
         self.setAcceptDrops(True)
         self.setMinimumHeight(60)
-        
+        self.allowed_extensions = [ext.lower() for ext in (extensions or ['.pdf'])]
+
         layout = QVBoxLayout(self)
         layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        
-        self.label = QLabel("🎯 Arraste PDFs aqui ou clique para selecionar")
+
+        self.label = QLabel(label)
         self.label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.label.setStyleSheet("""
             QLabel {
@@ -1232,25 +1323,30 @@ class DropZoneWidget(QWidget):
                 background-color: #2b2b2b;
             }
         """)
-        
+
         layout.addWidget(self.label)
-        
+
         # Permite clicar para selecionar
         self.label.mousePressEvent = self._on_click
-    
+
     def _on_click(self, event):
         """Abre diálogo de seleção quando clicado"""
         if hasattr(self.parent(), 'select_pdfs'):
             self.parent().select_pdfs()
-    
+
     def dragEnterEvent(self, event: QDragEnterEvent):
         if event.mimeData().hasUrls():
             urls = event.mimeData().urls()
-            pdf_files = [url.toLocalFile() for url in urls if url.toLocalFile().lower().endswith('.pdf')]
-            if pdf_files:
+            dropped_files = [url.toLocalFile() for url in urls]
+            filtered = [
+                file
+                for file in dropped_files
+                if any(file.lower().endswith(ext) for ext in self.allowed_extensions)
+            ]
+            if filtered:
                 event.acceptProposedAction()
                 self.label.setStyleSheet(self.label.styleSheet() + "border-color: #2cc985;")
-    
+
     def dragLeaveEvent(self, event):
         self.label.setStyleSheet(self.label.styleSheet().replace("border-color: #2cc985;", ""))
     
@@ -1500,14 +1596,17 @@ class HistoryItemWidget(QWidget):
         
         ficha_results = get_ficha_results_from_payload(entry.result_data)
         ficha_outputs = flatten_ficha_outputs(entry.result_data) if entry.result_data else []
+        processor_name = entry.result_data.get('processor') if entry.result_data else None
 
-        if entry.success and ficha_outputs:
+        if entry.success and ficha_results:
             names = collect_ficha_person_names(entry.result_data)
             if names:
                 person_name = ", ".join(names)
             else:
                 person_name = Path(entry.pdf_file).stem
             display_name = f"Ficha Financeira • {person_name}"
+        elif entry.success and processor_name == 'planilha_dados':
+            display_name = f"Planilha de Dados • {Path(entry.pdf_file).stem}"
         elif entry.success and entry.result_data.get('arquivo_final'):
             display_name = Path(entry.result_data['arquivo_final']).stem
         else:
@@ -1527,12 +1626,16 @@ class HistoryItemWidget(QWidget):
         
         # Resultado e timestamp
         if entry.success:
-            if ficha_outputs:
+            if ficha_outputs and processor_name != 'planilha_dados':
                 count_outputs = len(ficha_outputs)
                 result_text = f"✓ {count_outputs} arquivo{'s' if count_outputs != 1 else ''} gerado{'s' if count_outputs != 1 else ''}"
                 pdf_count = entry.result_data.get('pdf_count') or len(ficha_results)
                 if pdf_count:
                     result_text += f" • {pdf_count} PDF{'s' if pdf_count != 1 else ''} consolidados"
+            elif processor_name == 'planilha_dados':
+                outputs = entry.result_data.get('outputs', [])
+                count_outputs = len(outputs)
+                result_text = f"✓ {count_outputs} CSV{'s' if count_outputs != 1 else ''} gerado{'s' if count_outputs != 1 else ''}"
             else:
                 result_text = f"✓ {entry.result_data.get('total_extracted', 0)} períodos processados"
                 if entry.result_data.get('person_name'):
@@ -1840,6 +1943,25 @@ class HistoryDetailsDialog(QDialog):
                     outputs_layout.addWidget(folder_label)
 
             layout.addWidget(outputs_group)
+        elif entry.success and entry.result_data.get('processor') == 'planilha_dados':
+            outputs_group = QGroupBox("📂 Arquivos gerados")
+            outputs_layout = QVBoxLayout(outputs_group)
+
+            outputs = entry.result_data.get('outputs', [])
+            for item in outputs:
+                label = QLabel(f"• {item.get('label', 'Arquivo')}: {item.get('path', '')}")
+                label.setStyleSheet("color: #ccc; font-size: 11px; margin-left: 15px;")
+                label.setWordWrap(True)
+                outputs_layout.addWidget(label)
+
+            folder = entry.result_data.get('output_folder')
+            if folder:
+                folder_label = QLabel(f"📁 Pasta: {folder}")
+                folder_label.setStyleSheet("color: #888; font-size: 10px; font-style: italic; margin-left: 15px;")
+                folder_label.setWordWrap(True)
+                outputs_layout.addWidget(folder_label)
+
+            layout.addWidget(outputs_group)
 
         # Área de logs (ajustada)
         logs_group = QGroupBox("📄 Logs Detalhados")
@@ -2039,9 +2161,12 @@ class MainWindow(QMainWindow):
         self.statusBar().showMessage("Sistema iniciado - v4.0.1 PyQt6")
 
     def _format_project_header(self) -> str:
-        model_name = (
-            "Recibo Modelo 1" if self.project_model == ProjectManager.MODEL_RECIBO else "Ficha Financeira"
-        )
+        if self.project_model == ProjectManager.MODEL_RECIBO:
+            model_name = "Recibo Modelo 1"
+        elif self.project_model == ProjectManager.MODEL_FICHA:
+            model_name = "Ficha Financeira"
+        else:
+            model_name = "Planilha de Dados"
         return f"{self.project.name} • {model_name}"
 
     def _toggle_project_panel(self):
@@ -2216,8 +2341,10 @@ class MainWindow(QMainWindow):
 
             if self.project_model == ProjectManager.MODEL_RECIBO:
                 self.setWindowTitle(f"Recibo Modelo 1 • {self.project.name}")
-            else:
+            elif self.project_model == ProjectManager.MODEL_FICHA:
                 self.setWindowTitle(f"Ficha Financeira • {self.project.name}")
+            else:
+                self.setWindowTitle(f"Planilha de Dados • {self.project.name}")
 
             QMessageBox.information(
                 self,
@@ -2332,6 +2459,15 @@ class MainWindow(QMainWindow):
             self.select_btn.setText("📂 Selecionar PDFs da ficha")
             self.drop_zone.label.setText("🎯 Arraste PDFs da ficha financeira aqui ou clique para selecionar")
             self.files_group.setTitle("📎 PDFs da ficha financeira")
+        elif self.project_model == ProjectManager.MODEL_PLANILHA:
+            self.config_group.setTitle("📁 Pasta de saída dos CSVs")
+            help_label.setText("Selecione a pasta onde os CSVs de cada planilha serão gravados:")
+            self.dir_entry.setPlaceholderText("Caminho para a pasta de saída...")
+            self.process_btn.setText("🚀 Processar planilhas")
+            self.select_btn.setText("📂 Selecionar planilhas")
+            self.drop_zone.label.setText("🎯 Arraste planilhas XLS/XLSX/XLSM aqui ou clique para selecionar")
+            self.files_group.setTitle("📎 Seleção de Planilhas")
+            self.drop_zone.allowed_extensions = ['.xls', '.xlsx', '.xlsm']
     
     def create_history_tab(self):
         """Cria aba de histórico"""
@@ -2531,7 +2667,7 @@ class MainWindow(QMainWindow):
     
     def select_directory(self):
         """Seleciona diretório de trabalho"""
-        if self.project_model == ProjectManager.MODEL_FICHA:
+        if self.project_model in (ProjectManager.MODEL_FICHA, ProjectManager.MODEL_PLANILHA):
             caption = "Selecione a pasta de saída dos CSVs"
         else:
             caption = "Selecione o diretório de trabalho (que contém MODELO.xlsm)"
@@ -2558,7 +2694,7 @@ class MainWindow(QMainWindow):
             self.config_status.setStyleSheet("color: #ffa726; font-weight: bold;")
             return
         
-        if self.project_model == ProjectManager.MODEL_FICHA:
+        if self.project_model in (ProjectManager.MODEL_FICHA, ProjectManager.MODEL_PLANILHA):
             path = Path(directory)
             if path.exists() and path.is_dir():
                 self.config_status.setText("✅ Pasta válida")
@@ -2595,19 +2731,29 @@ class MainWindow(QMainWindow):
         if not self.trabalho_dir:
             if self.project_model == ProjectManager.MODEL_FICHA:
                 QMessageBox.warning(self, "Configuração necessária", "Informe a pasta de saída antes de selecionar os PDFs.")
+            elif self.project_model == ProjectManager.MODEL_PLANILHA:
+                QMessageBox.warning(self, "Configuração necessária", "Informe a pasta de saída antes de selecionar as planilhas.")
             else:
                 QMessageBox.warning(self, "Configuração Necessária", "Configure o diretório de trabalho primeiro.")
             return
 
-        dialog_title = "Selecione os PDFs da ficha financeira" if self.project_model == ProjectManager.MODEL_FICHA else "Selecione arquivos PDF (um ou múltiplos)"
+        if self.project_model == ProjectManager.MODEL_FICHA:
+            dialog_title = "Selecione os PDFs da ficha financeira"
+            file_filter = "Arquivos PDF (*.pdf)"
+        elif self.project_model == ProjectManager.MODEL_PLANILHA:
+            dialog_title = "Selecione as planilhas de dados"
+            file_filter = "Planilhas Excel (*.xls *.xlsx *.xlsm)"
+        else:
+            dialog_title = "Selecione arquivos PDF (um ou múltiplos)"
+            file_filter = "Arquivos PDF (*.pdf)"
 
         files, _ = QFileDialog.getOpenFileNames(
             self,
             dialog_title,
             self.trabalho_dir,
-            "Arquivos PDF (*.pdf)"
+            file_filter
         )
-        
+
         if files:
             self.selected_files = files
             self.update_selected_files_display()
@@ -2619,7 +2765,13 @@ class MainWindow(QMainWindow):
     
     def handle_dropped_files(self, files):
         """Manipula arquivos arrastados"""
-        self.selected_files = files
+        if self.project_model == ProjectManager.MODEL_PLANILHA:
+            allowed_ext = ('.xls', '.xlsx', '.xlsm')
+            self.selected_files = [f for f in files if f.lower().endswith(allowed_ext)]
+        elif self.project_model == ProjectManager.MODEL_FICHA:
+            self.selected_files = [f for f in files if f.lower().endswith('.pdf')]
+        else:
+            self.selected_files = files
         self.update_selected_files_display()
     
     def update_selected_files_display(self):
@@ -2706,11 +2858,19 @@ class MainWindow(QMainWindow):
             return
 
         if not self.selected_files:
-            QMessageBox.critical(self, "Nenhum Arquivo Selecionado", "Selecione pelo menos um arquivo PDF para processar.")
+            QMessageBox.critical(
+                self,
+                "Nenhum Arquivo Selecionado",
+                "Selecione pelo menos um arquivo para processar."
+                if self.project_model == ProjectManager.MODEL_PLANILHA
+                else "Selecione pelo menos um arquivo PDF para processar."
+            )
             return
 
         if self.project_model == ProjectManager.MODEL_FICHA:
             self._process_ficha_financeira()
+        elif self.project_model == ProjectManager.MODEL_PLANILHA:
+            self._process_planilha_dados()
         else:
             self._process_recibo()
 
@@ -2766,6 +2926,33 @@ class MainWindow(QMainWindow):
         self.progress_dialog.show()
 
         self.processor_thread.start()
+
+    def _process_planilha_dados(self):
+        self.processing = True
+        self.process_btn.setText("🔄 Processando...")
+        self.process_btn.setEnabled(False)
+
+        start_period, end_period = self._get_project_period()
+
+        self.processor_thread = PlanilhaDadosBatchThread(
+            self.selected_files,
+            start_period,
+            end_period,
+            self.trabalho_dir,
+            self.max_threads,
+        )
+
+        self.processor_thread.progress_updated.connect(self.handle_progress_update)
+        self.processor_thread.pdf_completed.connect(self.handle_pdf_completed)
+        self.processor_thread.batch_completed.connect(self.handle_batch_completed)
+        self.processor_thread.log_message.connect(self.add_log_message)
+
+        self.progress_dialog = BatchProgressDialog(self.selected_files, self)
+        self.processor_thread.progress_updated.connect(self.progress_dialog.update_pdf_progress)
+        self.processor_thread.batch_completed.connect(self.progress_dialog.handle_batch_completed)
+        self.progress_dialog.show()
+
+        self.processor_thread.start()
     
     @pyqtSlot(str, int, str)
     def handle_progress_update(self, filename, progress, message):
@@ -2788,6 +2975,21 @@ class MainWindow(QMainWindow):
                 attention_details=[],
             )
 
+            self.processing_history.append(entry)
+            self.persistence.save_history_entry(entry)
+            return
+        if self.project_model == ProjectManager.MODEL_PLANILHA:
+            entry = HistoryEntry(
+                timestamp=datetime.now(),
+                pdf_file=filename,
+                success=result_data.get('success', False),
+                result_data=result_data,
+                logs=self.current_logs.copy(),
+                is_batch=len(self.selected_files) > 1,
+                batch_info={'batch_size': len(self.selected_files), 'processed_in_batch': True}
+                if len(self.selected_files) > 1
+                else {},
+            )
             self.processing_history.append(entry)
             self.persistence.save_history_entry(entry)
             return
@@ -2825,7 +3027,10 @@ class MainWindow(QMainWindow):
     def handle_batch_completed(self):
         """Manipula conclusão do processamento"""
         self.processing = False
-        self.process_btn.setText("🚀 Processar PDFs")
+        if self.project_model == ProjectManager.MODEL_PLANILHA:
+            self.process_btn.setText("🚀 Processar planilhas")
+        else:
+            self.process_btn.setText("🚀 Processar PDFs")
         self.process_btn.setEnabled(True)
 
         # Fecha dialog de progresso se existir
@@ -2949,11 +3154,12 @@ class MainWindow(QMainWindow):
         
         # Atualiza status (simplificado, sem distinção de lote)
         total = len(self.processing_history)
+        item_label = "planilhas" if self.project_model == ProjectManager.MODEL_PLANILHA else "PDFs"
         if total > 0:
             success_count = sum(1 for h in self.processing_history if h.success)
             attention_count = sum(1 for h in self.processing_history if h.has_attention)
-            
-            status_text = f"{total} PDFs no histórico ({success_count} sucessos, {total - success_count} falhas)"
+
+            status_text = f"{total} {item_label} no histórico ({success_count} sucessos, {total - success_count} falhas)"
             if attention_count > 0:
                 status_text += f" • ⚠️ {attention_count} com atenção"
             
@@ -2991,6 +3197,30 @@ class MainWindow(QMainWindow):
 
                 if not path_to_open or not path_to_open.exists():
                     QMessageBox.warning(self, "Pasta não encontrada", "Não foi possível localizar a pasta dos arquivos gerados.")
+                    return
+
+                if sys.platform.startswith('win'):
+                    os.startfile(path_to_open)
+                elif sys.platform == 'darwin':
+                    subprocess.Popen(['open', str(path_to_open)])
+                else:
+                    subprocess.Popen(['xdg-open', str(path_to_open)])
+                return
+
+            if entry.result_data.get('processor') == 'planilha_dados':
+                outputs = entry.result_data.get('outputs', [])
+                target_folder = entry.result_data.get('output_folder')
+                if not target_folder and outputs:
+                    first_output = Path(outputs[0].get('path', ''))
+                    target_folder = str(first_output.parent) if first_output else None
+
+                if not target_folder:
+                    QMessageBox.warning(self, "Pasta não encontrada", "Não foi possível localizar os arquivos gerados.")
+                    return
+
+                path_to_open = Path(target_folder)
+                if not path_to_open.exists():
+                    QMessageBox.warning(self, "Pasta não encontrada", "Não foi possível localizar os arquivos gerados.")
                     return
 
                 if sys.platform.startswith('win'):
@@ -3287,6 +3517,9 @@ class AppController(QObject):
         if self.project_window.project_model == ProjectManager.MODEL_FICHA:
             self.project_window.add_log_message("🚀 Módulo Ficha Financeira pronto para gerar CSVs.")
             self.project_window.add_log_message("📄 Informe o período do projeto e escolha os PDFs para consolidar os dados.")
+        elif self.project_window.project_model == ProjectManager.MODEL_PLANILHA:
+            self.project_window.add_log_message("🚀 Módulo Planilha de Dados pronto para gerar CSVs.")
+            self.project_window.add_log_message("📊 Defina o período e selecione as planilhas XLS/XLSX/XLSM para processamento paralelo.")
         else:
             self.project_window.add_log_message("🚀 Aplicação PyQt6 v4.0.1 iniciada com sucesso!")
             self.project_window.add_log_message("💡 Interface moderna com performance nativa carregada")
